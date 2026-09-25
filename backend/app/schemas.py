@@ -28,6 +28,27 @@ class EntryPayload(BaseModel):
     remark: str | None = None
 
 
+class ImportPayload(BaseModel):
+    """批量导入时提交的整批记录，每行是一条待校验的单证。"""
+
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ImportFailure(BaseModel):
+    """一条不合格记录的行号与原因，只回报不落库。"""
+
+    line: int
+    code: str
+    reason: str
+
+
+class ImportResult(BaseModel):
+    ok: bool
+    message: str
+    created: int
+    failed: list[ImportFailure] = Field(default_factory=list)
+
+
 
 class BerthEntry(BaseModel):
     """泊位计划明细结构。"""
