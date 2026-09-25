@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 
-from app.schemas import ActionResult, EntryPayload, PageResult
+from app.schemas import ActionResult, EntryPayload, ImportPayload, ImportResult, PageResult
 from app.services.manifest import ManifestService
 
 router = APIRouter(prefix="/api/manifest", tags=["单证处理"])
@@ -30,6 +31,48 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/template")
+def download_template() -> Response:
+    """下载批量导入模板：只有表头，列口径与页面一致。"""
+    filename = quote("单证导入模板.csv")
+    return Response(
+        content=service.template_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出单证处理清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "manifest", "total": total, "items": items}
+
+
+@router.get("/export/package")
+def export_package(ids: str = Query(default="", description="选中的单证 id，逗号分隔")) -> Response:
+    """把选中的单证按航次打包导出：ZIP 里每个航次一个 CSV，列与页面一致。"""
+    entry_ids: list[int] = []
+    for part in ids.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise HTTPException(status_code=400, detail=f"单证 id「{part}」不是有效数字")
+        entry_ids.append(int(part))
+    if not entry_ids:
+        raise HTTPException(status_code=400, detail="请先勾选要导出的单证")
+    package, message = service.export_package(entry_ids)
+    if package is None:
+        raise HTTPException(status_code=404, detail=message)
+    filename = quote("单证按航次打包.zip")
+    return Response(
+        content=package,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条单证明细；不存在时给出可读的错误说明。"""
@@ -48,6 +91,15 @@ def create_entry(payload: EntryPayload) -> ActionResult:
     return ActionResult(ok=True, message="单证已登记", entry=entry)
 
 
+@router.post("/import", response_model=ImportResult)
+def import_entries(payload: ImportPayload) -> ImportResult:
+    """按模板整批导入：逐条核对编号、类型、航次；不合格只报错不落库，重复文件不二次落库。"""
+    if not payload.content.strip():
+        raise HTTPException(status_code=400, detail="导入内容为空，请按模板填写后再上传")
+    result = service.import_entries(filename=payload.filename, content=payload.content)
+    return ImportResult(**result)
+
+
 @router.post("/{entry_id}/actions", response_model=ActionResult)
 def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     """对单条单证执行提交单证、审核通过、退回单证；不允许的动作会被拦下并说明原因。"""
@@ -56,10 +108,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出单证处理清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "manifest", "total": total, "items": items}

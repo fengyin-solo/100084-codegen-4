@@ -28,6 +28,32 @@ class EntryPayload(BaseModel):
     remark: str | None = None
 
 
+class ImportPayload(BaseModel):
+    """批量导入时提交的模板文件内容（前端读出文本后随 JSON 上传）。"""
+
+    filename: str = "未命名文件"
+    content: str = ""
+
+
+class ImportRowError(BaseModel):
+    """导入时某一条目核对不通过的说明。"""
+
+    line: int
+    key: str | None = None
+    reason: str
+
+
+class ImportResult(BaseModel):
+    """批量导入结果：新增条数、不合格条数与逐条原因。"""
+
+    ok: bool
+    message: str
+    created: int = 0
+    failed: int = 0
+    duplicated_file: bool = False
+    errors: list[ImportRowError] = Field(default_factory=list)
+
+
 
 class BerthEntry(BaseModel):
     """泊位计划明细结构。"""
